@@ -1,0 +1,86 @@
+name: New Release
+permissions:
+  contents: write
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number'
+        required: true
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Git Tag
+        run: |
+          VERSION='${{ github.event.inputs.version }}'
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG=v$VERSION" >> $GITHUB_ENV
+          if [ -f changelog.md ]; then
+            CHANGELOG=$(cat changelog.md)
+          else
+            CHANGELOG="No release notes provided."
+          fi
+          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
+          echo "$CHANGELOG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
+          git config user.name "discaps-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Version $VERSION"
+          git push origin "v$VERSION"
+
+      - name: Build Binary Tarball
+        run: |
+          swift build -c release --disable-sandbox
+          mv .build/release/discaps discaps
+          tar -czf discaps-${{ env.VERSION }}-macos-arm64.tar.gz discaps
+
+      - name: Push Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.TAG }}
+          name: "Version ${{ env.VERSION }}"
+          body: ${{ env.CHANGELOG }}
+          files: |
+            discaps-${{ env.VERSION }}-macos-arm64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Source Tarball sha256
+        run: |
+          SRC_URL="https://github.com/forcequitOS/discaps/archive/refs/tags/${{ env.TAG }}.tar.gz"
+          OUT="discaps-${{ env.VERSION }}-src.tar.gz"
+          for i in {1..10}; do
+            if curl -sSLf -o "$OUT" "$SRC_URL"; then
+              break
+            fi
+            echo "Source tarball not yet available (attempt $i); retrying..."
+            sleep 3
+          done
+          if [ ! -s "$OUT" ]; then
+            echo "Failed to download source tarball from $SRC_URL"
+            exit 1
+          fi
+          SHA256=$(shasum -a 256 "$OUT" | cut -d ' ' -f 1)
+          echo "SHA256=$SHA256" >> $GITHUB_ENV
+
+      - name: Update Homebrew Tap
+        run: |
+          git clone https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/forcequitOS/homebrew-brew tap
+          cd tap
+          sed -i.bak \
+            -e "s|url \".*\"|url \"https://github.com/forcequitOS/discaps/archive/refs/tags/${{ env.TAG }}.tar.gz\"|" \
+            -e "s|sha256 \".*\"|sha256 \"${{ env.SHA256 }}\"|" \
+            -e "s|version \".*\"|version \"${{ env.VERSION }}\"|" \
+            discaps.rb
+          git config user.name "discaps-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add discaps.rb
+          git commit -m "discaps ${{ env.VERSION }}"
+          git push origin main
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
