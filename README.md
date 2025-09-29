@@ -33,7 +33,7 @@ And you're off to the races!
 This is quite literally the exact same thing as netcaps, but for disk activity, so the same stuff for netcaps also applies here. Check out the sister program, netcaps, [here.](https://github.com/forcequitOS/netcaps)
 
 >[!NOTE]
-All functionality of your Caps Lock key is 100% preserved with discaps. Also, netcaps is proudly written in Swift. Yay. 
+All functionality of your Caps Lock key is 100% preserved with discaps. Also, discaps is proudly written in Swift. Yay. 
 
 >[!WARNING]
 I don't know if this will impact your battery life or if it'll kill your Caps Lock key LED over time. Your mileage may vary. I'm not responsible if this somehow blows up your computer, but it probably shouldn't. 
