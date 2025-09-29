@@ -29,7 +29,7 @@ It couldn't get much simpler than this.
 ---
 And you're off to the races!
 
->[!NOTE]
+>[!TIP]
 This is quite literally the exact same thing as netcaps, but for disk activity, so the same stuff for netcaps also applies here. Check out the sister program, netcaps, [here.](https://github.com/forcequitOS/netcaps)
 
 >[!NOTE]
