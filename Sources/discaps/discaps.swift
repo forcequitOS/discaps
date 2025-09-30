@@ -24,56 +24,68 @@ func isCapsLockOn() -> Bool {
 
 // MARK: - Blink Caps Lock LED
 @MainActor
-func blinkCapsLock(times: Int = 1, interval: TimeInterval = legitInterval) {
-    let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-    let match: [[String: Any]] = [[
-        kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop,
-        kIOHIDDeviceUsageKey as String: kHIDUsage_GD_Keyboard
-    ]]
-    IOHIDManagerSetDeviceMatchingMultiple(manager, match as CFArray)
-    
-    let openRc = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-    if openRc == kIOReturnNotPermitted {
-        print("Input Monitoring permissions need to be granted, exiting...")
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
-        exit(1)
-    }
-    
-    guard let devicesCF = IOHIDManagerCopyDevices(manager) else { return }
-    let devices = devicesCF as! Set<IOHIDDevice>
-    
-    func toggle(_ on: Bool) {
+class CapsLockLEDManager {
+    private let manager: IOHIDManager
+    private var cachedLEDElements: [(device: IOHIDDevice, element: IOHIDElement)] = []
+    init?() {
+        manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        let match: [[String: Any]] = [[
+            kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop,
+            kIOHIDDeviceUsageKey as String: kHIDUsage_GD_Keyboard
+        ]]
+        IOHIDManagerSetDeviceMatchingMultiple(manager, match as CFArray)
+        let openRc = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        if openRc == kIOReturnNotPermitted {
+            print("Input Monitoring permissions need to be granted, exiting...")
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
+            exit(1)
+        }
+        guard let devicesCF = IOHIDManagerCopyDevices(manager) else { return nil }
+        let devices = devicesCF as! Set<IOHIDDevice>
         for device in devices {
             guard let elementsCF = IOHIDDeviceCopyMatchingElements(device, nil, 0) else { continue }
             let elements = elementsCF as! [IOHIDElement]
-            for e in elements {
-                if IOHIDElementGetUsagePage(e) == kHIDPage_LEDs &&
-                   IOHIDElementGetUsage(e) == UInt32(kHIDUsage_LED_CapsLock) {
-                    let value = IOHIDValueCreateWithIntegerValue(
-                        kCFAllocatorDefault,
-                        e,
-                        mach_absolute_time(),
-                        on ? 1 : 0
-                    )
-                    IOHIDDeviceSetValue(device, e, value)
+            for element in elements {
+                if IOHIDElementGetUsagePage(element) == kHIDPage_LEDs &&
+                   IOHIDElementGetUsage(element) == UInt32(kHIDUsage_LED_CapsLock) {
+                    cachedLEDElements.append((device, element))
                 }
             }
         }
     }
     
-    let capsOn = isCapsLockOn()
-    for _ in 1...times {
-        if capsOn {
-            toggle(false)
-            Thread.sleep(forTimeInterval: interval)
-            toggle(true)
-        } else {
-            toggle(true)
-            Thread.sleep(forTimeInterval: interval)
-            toggle(false)
+    func toggle(_ on: Bool) {
+        for (device, element) in cachedLEDElements {
+            let value = IOHIDValueCreateWithIntegerValue(
+                kCFAllocatorDefault,
+                element,
+                mach_absolute_time(),
+                on ? 1 : 0
+            )
+            IOHIDDeviceSetValue(device, element, value)
         }
-        Thread.sleep(forTimeInterval: interval)
     }
+    
+    func blink(times: Int = 1, interval: TimeInterval) {
+        let capsOn = isCapsLockOn()
+        for _ in 1...times {
+            if capsOn {
+                toggle(false)
+                Thread.sleep(forTimeInterval: interval)
+                toggle(true)
+            } else {
+                toggle(true)
+                Thread.sleep(forTimeInterval: interval)
+                toggle(false)
+            }
+            Thread.sleep(forTimeInterval: interval)
+        }
+    }
+}
+@MainActor let ledManager = CapsLockLEDManager()
+@MainActor
+func blinkCapsLock(times: Int = 1, interval: TimeInterval = legitInterval) {
+    ledManager?.blink(times: times, interval: interval)
 }
 
 // MARK: - Disk Monitoring
@@ -116,7 +128,7 @@ struct main {
         let args = CommandLine.arguments
         let silent = args.contains("-s") || args.contains("--silent")
         if args.contains("-v") || args.contains("--version") {
-            print("discaps version 1.0.0")
+            print("discaps version 1.1.0")
             print("    Made by Taj C (forcequit)")
             print("    Check this out on GitHub, at https://github.com/forcequitOS/discaps")
             exit(0)
@@ -134,9 +146,14 @@ struct main {
             exit(0)
         }
         
-        // MARK: - Main Loop
+        if silent {
+            setpriority(PRIO_PROCESS, 0, 10)
+        }
         var previousBytes = getDiskBytes()
+        var checksWithoutActivity = 0
+        let maxChecksBeforeSlowdown = 7500
         
+        // MARK: - Main Loop
         while true {
             setInterval()
             Thread.sleep(forTimeInterval: legitInterval)
@@ -146,6 +163,12 @@ struct main {
                     print("Read: \(currentBytes.read), Write: \(currentBytes.write)")
                 }
                 blinkCapsLock()
+                checksWithoutActivity = 0
+            } else {
+                checksWithoutActivity += 1
+                if checksWithoutActivity >= maxChecksBeforeSlowdown {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
             }
             previousBytes = currentBytes
         }
