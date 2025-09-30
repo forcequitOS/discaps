@@ -10,6 +10,9 @@ on:
 jobs:
   release:
     runs-on: macos-latest
+    env:
+      VERSION: ${{ github.event.inputs.version }}
+      TAG: v${{ github.event.inputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,7 +25,6 @@ jobs:
 
       - name: Create Git Tag
         run: |
-          VERSION='${{ github.event.inputs.version }}'
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAG=v$VERSION" >> $GITHUB_ENV
           if [ -f changelog.md ]; then
